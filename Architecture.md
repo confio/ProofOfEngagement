@@ -161,7 +161,10 @@ However, we *will* add in-protocol support for double-signing punishments, as th
 [`x/evidence` BeginBlocker](https://github.com/cosmos/cosmos-sdk/blob/master/x/evidence/abci.go), except rather than
 [bind the processing to the `slashingKeeper`](https://github.com/cosmos/cosmos-sdk/blob/master/x/evidence/keeper/infraction.go), we will inform a CosmWasm module of the slashing event, and allow it to handle this as needed.
 
-**TODO**: Define callback spec cw9, show example with PoA integration, with PoS integration.
+CW9 is essentially one message that must be supported from the contact `HandleMsg::Byzantine{type, tm_pubkey}` with
+the type (`abci.EvidenceType_DUPLICATE_VOTE`, `abci.EvidenceType_LIGHT_CLIENT_ATTACK`) and the original tendermint
+pubkey. The module doing the slashing needs to implement CW7 or be able to query the CW7 module in order to map
+the Tendermint PubKey to the SDK Address of the validator (which is the one with staking/voting power).
 
 Note: As with the cw7 contract, this must be highly trusted, as it is called in `BeginBlocker` without any gas limit.
 If you allow the code to update the `Authority` set, it also provides an attack vector to the validator set. cw7, cw8,
