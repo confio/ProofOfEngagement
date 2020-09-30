@@ -1,3 +1,4 @@
+import copy
 import random
 import statistics
 
@@ -77,7 +78,8 @@ def create_delegator(delegation, validator_index=None):
 
 def create_delegators(n_delegators, validators, delegation_stake_multiple):
     sum_validators_self_stake = sum(
-        [validator['self_stake'] for validator in validators])
+        [validator['self_stake'] for validator in validators]
+    )
     delegation = delegation_stake_multiple * \
         sum_validators_self_stake / n_delegators
     return [create_delegator(delegation) for _ in range(n_delegators)]
@@ -121,20 +123,21 @@ def calculate_yield(validator, total_voting_weight, params):
 
 
 def hypothesize_yield(delegator, validator_index, validators, params):
+    hypothetical_validators = copy.deepcopy(validators)
     current_validator_index = delegator['validator']
     delegation = delegator['delegation']
 
     if current_validator_index == validator_index:
         total_voting_weight = calculate_total_voting_weight(
-            validators, params)
-        return calculate_yield(validators[current_validator_index], total_voting_weight, params)
+            hypothetical_validators, params)
+        return calculate_yield(hypothetical_validators[current_validator_index], total_voting_weight, params)
 
     if current_validator_index != None:
-        validators[current_validator_index]['delegation'] -= delegation
+        hypothetical_validators[current_validator_index]['delegation'] -= delegation
 
-    next_validator = validators[validator_index]
+    next_validator = hypothetical_validators[validator_index]
     next_validator['delegation'] += delegation
     total_voting_weight = calculate_total_voting_weight(
-        validators, params)
+        hypothetical_validators, params)
 
     return calculate_yield(next_validator, total_voting_weight, params)
