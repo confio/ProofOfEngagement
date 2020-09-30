@@ -39,5 +39,6 @@ def calculate_yield(validator, total_voting_weight, params):
         return 0
 
     voting_weight = calculate_voting_weight(validator, params)
+    self_stake_voting_weight = f(self_stake, engagement)
 
-    return (inflation_rate * (1 - commission_rate) * (voting_weight - f(self_stake, engagement))) / (delegation * total_voting_weight)
+    return (inflation_rate * (1 - commission_rate) * (voting_weight - self_stake_voting_weight)) / (delegation * total_voting_weight)
