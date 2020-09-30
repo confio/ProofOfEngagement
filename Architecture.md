@@ -43,7 +43,7 @@ type Permissions struct {
     Distribution sdk.AccAddress
     // Address of a CosmWasm contract (CW9) that receives slashing evidence and can punish validators
     // Added in "Slashing Feedback" (if nil, no slashing occurs)
-    Distribution sdk.AccAddress
+    Slashing sdk.AccAddress
 }
 
 type Validator struct {
@@ -155,9 +155,25 @@ However, we *will* add in-protocol support for double-signing punishments, as th
 **TODO**: Define callback spec cw9, show example with PoA integration, with PoS integration.
 
 Note: As with the cw7 contract, this must be highly trusted, as it is called in `BeginBlocker` without any gas limit.
-If you allow the code to update the `Authority` module, it also provides an attack vector to the validator set. cw7, cw8,
+If you allow the code to update the `Authority` set, it also provides an attack vector to the validator set. cw7, cw8,
 and cw9 contracts should be audited and approved by governance. Just as the `staking`, `slashing`, `distribution` and 
 `evidence` native modules in the Cosmos-SDK.
+
+Here is a diagram of a possible contract setup for a PoS system with slashing and rewards enabled:
+
+```text
+   (Admin)                (Authority)              (Distribution)
++--------------+ read   +--------------+   read   +-------------------+
++ Cw3 80% vote + -----> | Cw4/7 Group  | <------  + Reward per weight |
++--------------+        +--------------+          +-------------------+
+                             ^
+                             | r/w
+                          (Slashing)
+                       +---------------------+
+                       | Staking Module      |
+                       |  (plus cw9 support) |
+                       +---------------------+
+```
 
 ## PoE as Simple Mixer
 
