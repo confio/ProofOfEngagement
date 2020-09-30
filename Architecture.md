@@ -24,7 +24,6 @@ roadmap, where each stage builds on the last:
 1. Governance control and voting power
 1. Support dPoS and delegator rewards/slashing
 1. Support dPoE and delegator rewards/slashing
-1. Experiment with different curves for PoE (and enable open experimentation)
 
 ## Contract-Controlled Validators
 
@@ -157,7 +156,7 @@ However, we *will* add in-protocol support for double-signing punishments, as th
 
 Note: As with the cw7 contract, this must be highly trusted, as it is called in `BeginBlocker` without any gas limit.
 If you allow the code to update the `Authority` set, it also provides an attack vector to the validator set. cw7, cw8,
-and cw9 contracts should be audited and approved by governance. Just as the `staking`, `slashing`, `distribution` and 
+and cw9 contracts should be audited and approved by governance. Just as the `staking`, `slashing`, `distribution` and
 `evidence` native modules in the Cosmos-SDK.
 
 ### Composition
@@ -248,20 +247,41 @@ Note that as we are adding more and more complexity to the contract composition,
 contracts in isolation no longer suffice and we will have to build up much more sophisticated test harnesses
 capable of simulating the entire system in unit tests and supporting the full array of native rust tooling
 (fuzzing, profiling, backtraces, step-by-step debugging) in composition. In fact, this is the major work
-required to extend the PoA and PoS designs into PoE - properly simulating and testing it. 
+required to extend the PoA and PoS designs into PoE - properly simulating and testing it.
 
 ## Governance
 
-**TODO**
+Once we have built up such systems. we have a very nice and flexible control over the algorithmic selection
+of the validator set, the reward distribution, and how to handle slashing. We show how we can add novel
+validator selection algorithms or even combine multiple algorithms easily, such as the PoE mixer above.
+
+However, so far there are two key elements of Cosmos native bPoS system we have not reproduced: delegations
+(next section), and governance votes. On-chain governance is essential in most Cosmos SDK applications
+to perform numerous adjustments live. Changing parameters of modules, triggering upgrades (via `x/upgrade`),
+or even using the permissioning system inside `x/wasm` itself. All of these module expose Proposal types and
+Handlers that can be used by the `x/governance` module to perform privileged operations.
+
+We can handle such votes inside CosmWasm with our multisigs, and we even rely on the `Admin` voting contract
+to trigger SDK native actions, via proposals that handle `CosmosMsg::Custom(CW7)`. However, they can only
+reflect custom messages that were compiled into the wasm build, not arbitrary interfaces registered in Go. We
+need a Go module to register all these interfaces and execute them when voting passes. We have two choices to
+make here:
+
+* Handle the voting rules in a CosmWasm contract (like Admin) and just reflect some
+`CosmosMsg::Custom(Governance::Pass{proposal_id})` message when the vote passes (storing the original sdk interface
+mapped by proposal_id in the go module)
+* Handle all voting in Go, similar to the current governance contract (using the same Msg types and queries for
+maximum compatibility with block explorers), and just calling into the CosmWasm contract once when the proposal is
+created to get the proper voting set to use.
+
+Both are possible and we should consider efficiency, code reuse on the blockchain, and client-side compatibility
+when making this decision. Currently, I am leaning towards option 2 and forking `x/governance` as the base,
+but we will see how all the code bases develop by the time we get here.
 
 ## dPoS with Delegators
 
 **TODO**
 
 ## dPoE with Delegators
-
-**TODO**
-
-## PoE Experiments
 
 **TODO**
