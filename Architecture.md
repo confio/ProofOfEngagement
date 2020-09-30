@@ -23,6 +23,7 @@ roadmap, where each stage builds on the last:
 1. PoE as mixer between PoA and PoS implementations
 1. Governance control and voting power
 1. Support dPoS and delegator rewards/slashing
+1. Support dPoE and delegator rewards/slashing
 1. Experiment with different curves for PoE (and enable open experimentation)
 
 ## Contract-Controlled Validators
@@ -159,6 +160,8 @@ If you allow the code to update the `Authority` set, it also provides an attack 
 and cw9 contracts should be audited and approved by governance. Just as the `staking`, `slashing`, `distribution` and 
 `evidence` native modules in the Cosmos-SDK.
 
+### Composition
+
 Here is a diagram of a possible contract setup for a PoS system with slashing and rewards enabled:
 
 ```text
@@ -175,15 +178,87 @@ Here is a diagram of a possible contract setup for a PoS system with slashing an
                        +---------------------+
 ```
 
+
+Here is a diagram of a possible contract setup for a PoA system with slashing and rewards enabled.
+Note we can handle the slashing either directly in the `Authority` group (as shown),
+or in the owner of that group (the cw3 60% vote), as both can update the group status.
+Pick the one which is easier to extend.
+
+```text
+   (Admin)                (Authority+Slashing?)        (Distribution)
++--------------+ read   +----------------+   read   +-------------------+
++ Cw3 80% vote + -----> | Cw4/7 Group    | <------  + Reward per weight |
++--------------+        +----------------+          +-------------------+
+                             ^
+                             | r/w
+                          (Slashing?)
+                       +---------------------+
+                       | Cw3 60% vote        |
+                       +---------------------+
+```
+
 ## PoE as Simple Mixer
 
-**TODO**
+Given the above models, the simplest way to implement PoE is just to create a "mixer" contract.
+We can extend the CW4 spec to enable "listeners". That is special contracts that get an update
+message each time the group changes. This works similar to the cw7 extension, but rather than make a
+special `CustomMsg` call to a native module on update, it would call a wasm contract with a
+predefined `ReceiverMsg` (the listener is sensitive and must be set by admin, as a buggy listener
+could block all group updates). Also, we only handle `sdk.AccAddress` / `HumanAddr` here, not the
+tendermint pubkey, so we are compatible with the generic cw4 groups used by multisigs.
+
+The PoE mixer is simply applies the curve `f(S, E)` to the two input groups to set an output
+group. On init, it can query both `PoS` and `PoA` and set values for every address present on either side,
+filtering out zeros, in order to get initial conditions. Afterwards, when it receives an update
+message, it can calculate the new value for that validator. On the trigger, it can query the specified
+validator address on `PoS` and `PoA` contracts, calculate `vote' = f(S', E')` and add that diff to the
+group contract it controls.
+
+A picture is worth a thousand works. Here we should how we can achieve full PoE (minus delegations)
+with only one minor additions to what we have already:
+
+```text
+   (Admin)                (Authority)                 (Distribution)
++--------------+ read   +----------------+   read   +-------------------+
++ Cw3 80% vote + -----> | Cw4/7 Group    | <------  + Reward per weight |
++--------------+        +----------------+          +-------------------+
+                             ^
+                             | write
+                       +---------------------+
+                       | PoE mixer           |
+                       +---------------------+
+                        ^                  ^
+             listener  /                    \ listener
+            +-------------+               +-------------+
+            | Cw4 Group   |               | Cw4 Group   |
+            +-------------+               +-------------+
+                 ^                               ^
+                 | r/w                           | r/w
+             (Slashing)                          |
+         +---------------------+         +---------------------+
+         | Staking Module      |         | Cw3 60% vote        |
+         |  (plus cw9 support) |         +---------------------+
+         +---------------------+
+```
+
+If we want to slash both Engagement and Stake on double-sign, we would need a second contract to call out
+to both sides and some more customization. This is doable, but one more step to add.
+
+Note that as we are adding more and more complexity to the contract composition, simple unit tests of
+contracts in isolation no longer suffice and we will have to build up much more sophisticated test harnesses
+capable of simulating the entire system in unit tests and supporting the full array of native rust tooling
+(fuzzing, profiling, backtraces, step-by-step debugging) in composition. In fact, this is the major work
+required to extend the PoA and PoS designs into PoE - properly simulating and testing it. 
 
 ## Governance
 
 **TODO**
 
 ## dPoS with Delegators
+
+**TODO**
+
+## dPoE with Delegators
 
 **TODO**
 
