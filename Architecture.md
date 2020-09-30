@@ -68,13 +68,21 @@ and are working to [separate groups from the voting conditions](https://github.c
 Groups will be defined in CW4.
 
 We can start with a standard, flexible multisig design. The group that stores the voters will implement not only
-CW4, but also CW7 and can be registered on `x/validator`. (Note that CW7 requires the Validator pubkey in addition
-to an sdk.AccAddress, so we will have a separate endpoint for people to pre-register a pubkey for their sdk.AccAddress
-on the CW7 group contract, which will be used when they are given voting weight).
+CW4, but also CW7 and can be registered on `x/validator`. Note that CW7 requires the Tendermint PubKey in addition
+to an sdk.AccAddress, in order to provide the validator set updates to `x/validator`. Thus, we will have a separate
+HandleMsg variant on the CW7 contract for people to pre-register a pubkey for their sdk.AccAddress
+on the CW7 group contract. This is permissionless to provide a mapping for the message sender,
+but will have no impact on the voting set the address is assigned a voting weight.
 
 There are 2 voting contracts. Contract A, with eg. 60% approval will allow updating the group. As the group
-implements CW7, this will automatically update the validator set upon changes. Contract B with eg. 80% approval
-can be the Admin and that can be used to swap out to another consensus module.
+implements CW7, this will automatically update the validator set upon changes. This means the tendermint consensus layer
+is just a mirror of the multisig voters. And these voters (who are also the validators) can vote to add voters/validators
+to the multisig + validator set (or remove them).
+
+This is a minimal PoA setup as used in many chains. In addition, we can add a Contract B with eg. 80% approval
+can be the `Admin` in `x/validator`. This allows a supermajority of the validator set to change the consensus algorithm
+(more precisely the *validator set selection* algorithm, as we always use tendermint BFT... bPoS is often
+mis-labeled a consensus algorithm)
 
 Note: The cw7 contract must be highly trusted and should only be set by a governance process with similar security to
 the validator set itself, as a buggy/malicious contract can halt or take over the chain.
@@ -128,9 +136,10 @@ It will have 3 main functionalities:
 ## Distributing Rewards
 
 This requires an enhancement to the `x/validator` native module and a new CW8 reward distribution spec.
-We need to be able to mint block rewards
-in a native token, as well as distribute the FeeCollector tokens, which cannot be done with a generic CosmWasm contract
-(for obvious security reasons).
+We need a native module to be able to mint block rewards
+in a native token, as well as distribute the FeeCollector tokens. For obvious security reasons,
+we cannot allow arbitrary CosmWasm contract to mint block rewards or distribute the collected fees. So we add a
+`Distribution` address to `x/validator` to control that permission.
 
 To limit overhead, we define an `Epoch` in the `x/validator` state, which is a delta (of block timestamp) at which rewards are distributed, as well as an block reward rate (per epoch). This is triggered by a `BeginBlock` handler of `x/validator`,
 which only runs once per epoch (first block that enters the next epoch) - among other things, this allows some level of "no empty blocks" to work, as we only change state once per epoch (not every block), allowing us to support reasonable "no_empty_blocks" timeouts up to the epoch size. I would recommend epochs on the scale of 5 minutes to 2 hours, depending on the dynamism of the chain (more dynamic => shorter) and the size of the validator set (larger => longer).
@@ -243,11 +252,15 @@ with only one minor additions to what we have already:
 If we want to slash both Engagement and Stake on double-sign, we would need a second contract to call out
 to both sides and some more customization. This is doable, but one more step to add.
 
-Note that as we are adding more and more complexity to the contract composition, simple unit tests of
+**Important** As we are adding more and more complexity to the contract composition, simple unit tests of
 contracts in isolation no longer suffice and we will have to build up much more sophisticated test harnesses
-capable of simulating the entire system in unit tests and supporting the full array of native rust tooling
-(fuzzing, profiling, backtraces, step-by-step debugging) in composition. In fact, this is the major work
-required to extend the PoA and PoS designs into PoE - properly simulating and testing it.
+capable of simulating the entire system. All current multi-component integration tests (contract-contract
+and contract-native callbacks) require running compiled wasm contracts inside `wasmd` and do not allow detailed
+debugging of the contract internals. In order to make use of the full array of native rust tooling
+(fuzzing, profiling, backtraces, step-by-step debugging) to allow us the same confidence in multi-contract
+composition as with single contract unit tests, we will need to build a native Rust (no wasm) integration test harness.
+In fact, this is the major work required to extend the PoA and PoS designs into PoE - properly simulating and testing it
+in order to provide confidence in implementation correctness.
 
 ## Governance
 
