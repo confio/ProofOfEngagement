@@ -181,7 +181,7 @@ Here is a diagram of a possible contract setup for a PoS system with slashing an
                              | r/w
                           (Slashing)
                        +---------------------+
-                       | Staking Module      |
+                       | Staking Contract    |
                        |  (plus cw9 support) |
                        +---------------------+
 ```
@@ -244,7 +244,7 @@ with only one minor additions to what we have already:
                  | r/w                           | r/w
              (Slashing)                          |
          +---------------------+         +---------------------+
-         | Staking Module      |         | Cw3 60% vote        |
+         | Staking Contract    |         | Cw3 60% vote        |
          |  (plus cw9 support) |         +---------------------+
          +---------------------+
 ```
@@ -293,8 +293,114 @@ but we will see how all the code bases develop by the time we get here.
 
 ## dPoS with Delegators
 
-**TODO**
+Adding delegators to PoS adds complexity on three fronts.
+
+The first is the stake accounting on the Staking Contract, in order to produce the proper voting weights and withdrawls.
+This should actually be a relatively minor change, an extra message to stake to a different address, and a bit more
+state info, but nothing that cannot be unit tested.
+
+The second complication is on Slashing. As long as we don't allow instant re-delegation, but force a full undelegate
+followed by delegate, then the Slashing logic (and slashing unbonding tokens) for delegators is no more complicated
+that for self-staking validators. I would consider instant redelegation a feature for v2 of dPoS to get us to a
+usable MvP early as possible.
+
+The third complication is Distribution. We can no longer do the naive distribution based on final weight, but need
+to take into account who is delegator, who is validator, and what the commission rate is. This makes it impossible
+to use a generic voting-weight based distribution module, but rather we must integrate the distribution directly inside
+the staking contract. I will present two ways of handling the distribution aspect in the [Composition](#dpos-composition)
+section below.
+
+### Staking Integration
+
+We may well want to allow other contracts to interact with our custom dPoS implementation without any changes.
+Allowing us to reuse all staking-related contracts eg. Staking Derivatives, which were designed to work with the
+standard Cosmos SDK `x/staking` module, to work with our contract-based dPoS system without any changes.
+
+To do so, we need to register a different [`StakingQuerier`](https://github.com/CosmWasm/wasmd/blob/master/x/wasm/internal/keeper/query_plugins.go#L123-L186) and [`StakingEncoder`](https://github.com/CosmWasm/wasmd/blob/master/x/wasm/internal/keeper/handler_plugin.go#L114-L192)
+in a custom blockchain app. These would register some contract address via genesis/governance and use that to route
+such queries to the specified contract rather than the default staking module.
+
+### dPoS Composition
+
+**Option 1** This is actually a simpler composition that the simpler PoS, at the expense of a more complicated
+staking contract, which now handles staking, slashing, and distribution in one monolith.
+
+```text
+   (Admin)                (Authority)
++--------------+ read   +--------------+
++ Cw3 80% vote + -----> | Cw4/7 Group  |
++--------------+        +--------------+
+                             ^
+                             | r/w
+                       (Slashing + Distribution)
+                       +---------------------+
+                       | Staking Contract    |
+                       |  (plus cw8 support) |
+                       |  (plus cw9 support) |
+                       +---------------------+
+```
+
+**Option 2** If we wish to reduce monoliths, and allow some more code reuse with dPoE, then we have to define a 2 step distribution methods. We can provide a generic distribution module, which takes a set of funds, and splits it up
+based on the voting weights (this is total income -> per validator income), handling rounding and such.
+It then transfers those funds to a new contract along with a list of all accounts that should be distributed to.
+
+The staking contract then gets that first split done, and just calculated the validator/delegator split for each validator,
+based on commission. I am not sure how much code savings is provided there, but this does allow some code-reuse with
+dPoE (but maybe we can just import utility functions to get the same code reuse with less complexity):
+
+```text
+   (Admin)                (Authority)             (Distribution)
++--------------+ read   +--------------+       +-----------------+
++ Cw3 80% vote + -----> | Cw4/7 Group  |<----- + Reward splitter +
++--------------+        +--------------+       +-----------------+
+                             ^                   /
+                             | r/w              / send funds to staking to sub-split
+                         (Slashing)            \/
+                       +---------------------------+
+                       |    Staking Contract       |
+                       |     (plus cw9 support)    |
+                       |(validator/delegator split)|
+                       +---------------------------+
+```
 
 ## dPoE with Delegators
 
-**TODO**
+PoE -> dPoE presents a very similar challenge to Pos -> dPoS. The main differences are that:
+
+1. The weights used to split between validators (reward splitter logic in option 2)
+is no longer the registered as a group on the Staking Contract. We could add one more field
+to set which contract we query to split (Option 1), or just wire up the distribution contract differently
+(Option 2)
+
+1. The major change is that the rewards are not split linearly between self-stake and delegation. Rather
+the total rewards received by validator i (Ri) is split such that validator fraction is
+`Vi = f(S, E) + c * [f(S + D, E) - f(S, E)] / f(S + D, E)` where S is self-stake and D is delegated stake.
+Likewise the delegator fraction is `Di = (1-c) * [f(S + D, E) - f(S, E)]/ f(S + D, E)`. Lots of math there
+which is only known to the PoE mixer, while the self-staking / delegation distribution is only known to
+the staking module.
+
+The second point will require us to once again consider more monolithic contracts (which makes composability
+and extensibility more difficult), or consider more complex cross-contract queries to do so. Note that this formula
+above also applies to the standard PoS module, just in the trivial case, where `f(S, E) = S`, such that it
+reduces to: `Vi = S + c*D / (S+D)` and `Di = (1-c)*D / (S+D)`.
+
+A monolithic implementation (Staking, Slashing, Delegator) is always doable. What requires research (and actual
+code that implements some of the above subsystems) is to see how to build PoE with a generic PoS contract
+without duplicating all that logic in two "similar but different" monoliths. In the end, this is not a horrible
+solution, and actually a bit more loosely coupled than the current Cosmos SDK design, but the super composability of
+the PoE without delegation encourages more design work to be done before implementation of this level begins.
+
+## Conclusion
+
+Above is a Roadmap from the simple multisig contracts of today to a modular, composable design for PoA, PoS, PoE with
+and without delegatons, along with full integration to the native governance system and all staking contracts. There
+are refinements that can be discovered along with way, but we present a clear step-by-step development path with
+many concrete deliverables along the way that can be deployed to testnets and get real-world feedback and testing
+without blocking on one giant epic.
+
+This will be the most complex system constructed with CosmWasm and as a side-effect it will push us to enhance the
+level of tooling to handle this level of complexity. Both to setup and connect graphs of contracts (init) as well
+as to run realistic integration tests in pure Rust. It will also give us time to refine composition techniques
+(smart queries, raw queries, directly importing code) and provide many examples to other CosmWasm developers who
+wish to build complex contract systems. Thus, I can assume that the achievable architectural path as described here
+will only be refined and simplified from the experience we gain with the first deliverables.
